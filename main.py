@@ -24,7 +24,7 @@ SUBSCRIBERS = [
     }
 ]
 
-# --- 🎯 WHITELIST STRICTE (SEULS CES ACHETEURS PASSENT) ---
+# --- 🎯 WHITELIST ACHETEURS (STRICT) ---
 TARGET_BUYERS = [
     "DIRECTION REGIONALE D'AGRICULTURE",
     "DIRECTEUR REGIONAL D'AGRICULTURE",
@@ -37,14 +37,14 @@ TARGET_BUYERS = [
     "OFFICE NATIONAL DE SECURITE SANITAIRE"
 ]
 
-# --- EXCLUSIONS (SÉCURITÉ ANTI-BRUIT) ---
-# On garde ça pour ne pas recevoir les offres de ménage/gardiennage même venant de l'Agri
+# --- EXCLUSIONS (SÉCURITÉ) ---
 EXCLUSIONS = [
-    "nettoyage", "gardiennage", "construction", "bâtiment", "plomberie",
-    "sanitaire", "peinture", "électricité", "jardinage", "espaces verts", 
-    "piscine", "vêtement", "habillement", "carburant", "véhicule", 
-    "transport", "billet", "aérien", "travaux", "voirie", "topographique",
-    "la peche", "secteur de la pêche", "maritime" 
+    "nettoyage", "gardiennage"
+    # , "construction", "bâtiment", "plomberie",
+    # "sanitaire", "peinture", "électricité", "jardinage", "espaces verts", 
+    # "piscine", "vêtement", "habillement", "carburant", "véhicule", 
+    # "transport", "billet", "aérien", "travaux", "voirie", "topographique",
+    # "la peche", "secteur de la pêche", "maritime" 
 ]
 
 def log(msg):
@@ -88,7 +88,6 @@ def scorer(text, buyer_name):
     if is_target_buyer:
         return 100, "Agri"
     else:
-        # Si l'acheteur n'est pas dans la liste, on rejette (Score 0)
         return 0, "Acheteur Non-Cible"
 
 def scan_ao_attempt():
@@ -96,67 +95,83 @@ def scan_ao_attempt():
     new_ids = set()
     pending_alerts = [] 
 
+    # --- CALCUL DES DATES (CORRECTION) ---
     today = datetime.now()
-    past = today - timedelta(days=30)
-    date_start = past.strftime("%d/%m/%Y")
-    date_end = today.strftime("%d/%m/%Y")
+    
+    # 1. Date de Mise en ligne : Entre "6 mois avant" et "Aujourd'hui"
+    date_pub_start = (today - timedelta(days=180)).strftime("%d/%m/%Y")
+    date_pub_end = today.strftime("%d/%m/%Y")
+
+    # 2. Date limite de remise des plis : Entre "Aujourd'hui" et "6 mois après"
+    date_deadline_start = today.strftime("%d/%m/%Y")
+    date_deadline_end = (today + timedelta(days=180)).strftime("%d/%m/%Y")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
         context = browser.new_context(viewport={"width": 1920, "height": 1080})
         page = context.new_page()
 
-        log(f"🌍 Connexion AO (Filtre Strict) : {date_start} -> {date_end}")
+        log(f"🌍 Connexion AO...")
+        log(f"📅 Filtre Publication : {date_pub_start} -> {date_pub_end}")
+        log(f"📅 Filtre Deadline    : {date_deadline_start} -> {date_deadline_end}")
         
         try:
             page.goto(URL_AO, timeout=90000)
             
-            page.fill("#ctl0_CONTENU_PAGE_AdvancedSearch_dateMiseEnLigneStart", date_start)
-            page.fill("#ctl0_CONTENU_PAGE_AdvancedSearch_dateMiseEnLigneEnd", date_end)
-            page.select_option("#ctl0_CONTENU_PAGE_AdvancedSearch_categorie", "3") 
+            # --- REMPLISSAGE DU FORMULAIRE ---
+            # 1. Mode de passation : AO Ouvert (1)
+            page.select_option("#ctl0_CONTENU_PAGE_AdvancedSearch_procedureType", "1")
             
-            log("📝 Formulaire rempli, Clic Rechercher...")
+            # 2. Catégorie : Services (3)
+            page.select_option("#ctl0_CONTENU_PAGE_AdvancedSearch_categorie", "3")
+            
+            # 3. Date limite de remise des plis (Champs dateMiseEnLigneStart/End sur ce site)
+            page.fill("#ctl0_CONTENU_PAGE_AdvancedSearch_dateMiseEnLigneStart", date_deadline_start)
+            page.fill("#ctl0_CONTENU_PAGE_AdvancedSearch_dateMiseEnLigneEnd", date_deadline_end)
+
+            # 4. Date de mise en ligne (Champs dateMiseEnLigneCalculeStart/End)
+            page.fill("#ctl0_CONTENU_PAGE_AdvancedSearch_dateMiseEnLigneCalculeStart", date_pub_start)
+            page.fill("#ctl0_CONTENU_PAGE_AdvancedSearch_dateMiseEnLigneCalculeEnd", date_pub_end)
+            
+            log("📝 Clic sur Rechercher...")
             with page.expect_navigation(timeout=60000):
                 page.click("#ctl0_CONTENU_PAGE_AdvancedSearch_lancerRecherche")
 
             try:
                 page.wait_for_selector(".table-results", timeout=20000)
-                log("✅ Tableau de résultats détecté !")
+                log("✅ Résultats affichés.")
             except:
-                log("⚠️ Pas de tableau de résultats trouvé (Timeout).")
+                log("⚠️ Aucun résultat ou Timeout.")
                 browser.close()
                 return True
 
-            # --- PAGINATION ET LECTURE ---
+            # --- GESTION AFFICHAGE 500 ---
             try:
                 count_text = page.locator("#ctl0_CONTENU_PAGE_resultSearch_nombreElement").inner_text()
                 total_results = int(count_text.strip())
-                log(f"📊 Total affiché par le site : {total_results} offres.")
+                log(f"📊 Total trouvé : {total_results} offres.")
             except:
                 total_results = 0
-                log("⚠️ Impossible de lire le nombre total.")
 
             if total_results > 10:
-                log("🔄 Passage à l'affichage 500 par page...")
+                log("🔄 Passage en mode 500 résultats...")
                 try:
-                    with page.expect_response(lambda response: response.status == 200, timeout=30000):
+                    with page.expect_response(lambda response: response.status == 200, timeout=60000):
                         page.select_option("#ctl0_CONTENU_PAGE_resultSearch_listePageSizeTop", "500")
                     time.sleep(3) 
                 except Exception as e:
-                    log(f"⚠️ Erreur changement page size: {e}")
+                    log(f"⚠️ Erreur changement affichage: {e}")
 
             total_pages = math.ceil(total_results / 500)
             if total_pages == 0: total_pages = 1
             
-            log(f"📚 Scan de {total_pages} page(s) prévu.")
-
+            # --- BOUCLE PAGES ---
             for current_page in range(1, total_pages + 1):
-                log(f"📄 Analyse Page {current_page}/{total_pages}...")
-
+                log(f"📄 Lecture Page {current_page}/{total_pages}...")
+                
                 rows = page.locator(".table-results tbody tr")
                 count_on_page = rows.count()
-                log(f"   🔎 {count_on_page} lignes trouvées sur cette page.")
-
+                
                 for i in range(count_on_page):
                     row = rows.nth(i)
                     if not row.is_visible(): continue
@@ -171,7 +186,6 @@ def scan_ao_attempt():
                         objet_el = row.locator("div[id*='_panelBlocObjet']")
                         objet = objet_el.inner_text().replace("Objet\n:", "").replace("Objet :", "").strip() if objet_el.count() > 0 else "N/A"
 
-                        # 🛠️ LOG DE DÉBOGAGE
                         log(f"   👉 [{i+1}] Acheteur: '{buyer}'")
 
                         offer_id = hashlib.md5(full_row_text.encode('utf-8')).hexdigest()
@@ -179,13 +193,13 @@ def scan_ao_attempt():
                             log("      ↳ 💤 Déjà vue (Ignorée)")
                             continue
 
-                        # --- SCORING STRICT ---
+                        # --- SCORING ---
                         score, matched_reason = scorer(objet, buyer)
-                        
+
                         if score > 0:
                             log(f"      ✅ VALIDÉE ! ({matched_reason})")
                             
-                            # Extraction date (Correction v7)
+                            # Extraction date (Correction V7)
                             deadline_cells = row.locator("td[headers='cons_dateEnd'] .cloture-line")
                             if deadline_cells.count() > 0:
                                 deadline = deadline_cells.first.inner_text().replace("\n", " ").strip()
@@ -218,27 +232,24 @@ def scan_ao_attempt():
                         log(f"   ⚠️ Erreur lecture ligne {i}: {e}")
                         continue
                 
+                # Suivant
                 if current_page < total_pages:
                     log("➡️ Clic Page Suivante...")
                     try:
                         page.click("#ctl0_CONTENU_PAGE_resultSearch_PagerTop_ctl2")
                         page.wait_for_load_state("networkidle")
                         time.sleep(3)
-                    except Exception as e:
-                        log(f"❌ Erreur pagination: {e}")
-                        break
+                    except: break
 
         except Exception as e:
-            log(f"❌ Erreur technique globale: {e}")
+            log(f"❌ Erreur: {e}")
             return False
 
         browser.close()
 
     if pending_alerts:
-        # On envoie les plus récentes en premier
         count_sent = 0
         admin_id = SUBSCRIBERS[0]["id"]
-        
         for item in pending_alerts:
             new_ids.add(item['id'])
             send_telegram_to_user(admin_id, item['msg'])
@@ -246,9 +257,9 @@ def scan_ao_attempt():
         
         seen_ids.update(new_ids)
         save_seen(seen_ids)
-        log(f"🚀 {count_sent} alertes Agri envoyées.")
+        log(f"🚀 {count_sent} alertes envoyées.")
     else:
-        log("Ø Aucune offre de la liste cible trouvée.")
+        log("Ø Aucune offre cible trouvée.")
 
     return True
 
@@ -264,8 +275,8 @@ def run_with_retries():
             time.sleep(60)
 
 if __name__ == "__main__":
-    log("🚀 Bot AO Démarré (FILTRE STRICT ACHETEURS)")
-    send_telegram_to_user(SUBSCRIBERS[0]["id"], "🚜 Bot AO (Strict) : Je ne t'envoie que la liste VIP !")
+    log("🚀 Bot AO Démarré (FILTRE DATES + ACHETEURS)")
+    send_telegram_to_user(SUBSCRIBERS[0]["id"], "🚜 Bot AO (Strict & Dates) : Je surveille les délais !")
     
     while True:
         run_with_retries()
