@@ -15,16 +15,16 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 URL_AO = "https://www.marchespublics.gov.ma/index.php?page=entreprise.EntrepriseAdvancedSearch&searchAnnCons"
 
-# --- 👤 UTILISATEUR UNIQUE (TOI) ---
+# --- 👤 UTILISATEUR UNIQUE ---
 SUBSCRIBERS = [
     {
         "name": "Administrateur",
-        "id": "1952904877", # Ton ID
-        "subscriptions": ["ALL"] # Tu reçois tout ce qui passe les filtres
+        "id": "1952904877", 
+        "subscriptions": ["ALL"] 
     }
 ]
 
-# --- 🎯 WHITELIST ACHETEURS (PRIORITÉ) ---
+# --- 🎯 WHITELIST ACHETEURS ---
 TARGET_BUYERS = [
     "DIRECTION REGIONALE D'AGRICULTURE",
     "DIRECTEUR REGIONAL D'AGRICULTURE",
@@ -107,7 +107,6 @@ def scan_ao_attempt():
     new_ids = set()
     pending_alerts = [] 
 
-    # Dates : 30 derniers jours à Aujourd'hui
     today = datetime.now()
     past = today - timedelta(days=30)
     date_start = past.strftime("%d/%m/%Y")
@@ -123,93 +122,96 @@ def scan_ao_attempt():
         try:
             page.goto(URL_AO, timeout=90000)
             
-            # --- REMPLISSAGE FORMULAIRE ---
             page.fill("#ctl0_CONTENU_PAGE_AdvancedSearch_dateMiseEnLigneStart", date_start)
             page.fill("#ctl0_CONTENU_PAGE_AdvancedSearch_dateMiseEnLigneEnd", date_end)
-            page.select_option("#ctl0_CONTENU_PAGE_AdvancedSearch_categorie", "3") # Services
+            page.select_option("#ctl0_CONTENU_PAGE_AdvancedSearch_categorie", "3") 
             
-            log("📝 Clic sur Rechercher...")
+            log("📝 Formulaire rempli, Clic Rechercher...")
             with page.expect_navigation(timeout=60000):
                 page.click("#ctl0_CONTENU_PAGE_AdvancedSearch_lancerRecherche")
 
-            # Attente du tableau
             try:
                 page.wait_for_selector(".table-results", timeout=20000)
+                log("✅ Tableau de résultats détecté !")
             except:
-                log("⚠️ Pas de résultats ou timeout.")
+                log("⚠️ Pas de tableau de résultats trouvé (Timeout).")
                 browser.close()
                 return True
 
-            # --- GESTION DU NOMBRE DE RÉSULTATS & PAGINATION ---
-            # 1. Lire le nombre total
+            # --- PAGINATION ET LECTURE ---
             try:
                 count_text = page.locator("#ctl0_CONTENU_PAGE_resultSearch_nombreElement").inner_text()
                 total_results = int(count_text.strip())
-                log(f"📊 Total trouvé : {total_results} offres.")
+                log(f"📊 Total affiché par le site : {total_results} offres.")
             except:
                 total_results = 0
                 log("⚠️ Impossible de lire le nombre total.")
 
-            # 2. Passer à 500 résultats si nécessaire
             if total_results > 10:
                 log("🔄 Passage à l'affichage 500 par page...")
                 try:
-                    # On sélectionne "500" et on attend que le site recharge
                     with page.expect_response(lambda response: response.status == 200, timeout=30000):
                         page.select_option("#ctl0_CONTENU_PAGE_resultSearch_listePageSizeTop", "500")
-                    # Petite pause de sécurité pour le rendu DOM
                     time.sleep(3) 
                 except Exception as e:
                     log(f"⚠️ Erreur changement page size: {e}")
 
-            # 3. Calcul des pages
-            # Si on affiche 500 par page, le nombre de pages est faible
             total_pages = math.ceil(total_results / 500)
             if total_pages == 0: total_pages = 1
             
             log(f"📚 Scan de {total_pages} page(s) prévu.")
 
-            # --- BOUCLE SUR LES PAGES ---
             for current_page in range(1, total_pages + 1):
-                log(f"📄 Analyse Page {current_page}...")
+                log(f"📄 Analyse Page {current_page}/{total_pages}...")
 
-                # Récupération des lignes
                 rows = page.locator(".table-results tbody tr")
                 count_on_page = rows.count()
-                log(f"   🔎 {count_on_page} lignes sur cette page.")
+                log(f"   🔎 {count_on_page} lignes trouvées sur cette page.")
+
+                if count_on_page == 0:
+                    log("   ⚠️ Bizarre : Aucune ligne 'tr' trouvée dans le tableau.")
 
                 for i in range(count_on_page):
                     row = rows.nth(i)
                     if not row.is_visible(): continue
 
                     try:
+                        # Extraction brute pour log
                         full_row_text = row.inner_text()
-                        offer_id = hashlib.md5(full_row_text.encode('utf-8')).hexdigest()
                         
-                        if offer_id in seen_ids: continue
-                        
-                        # Extraction
-                        ref_el = row.locator("span.ref")
-                        ref = ref_el.inner_text().strip() if ref_el.count() > 0 else "N/A"
-
+                        # --- EXTRACTION DES CHAMPS ---
                         objet_el = row.locator("div[id*='_panelBlocObjet']")
-                        objet = objet_el.inner_text().replace("Objet\n:", "").replace("Objet :", "").strip() if objet_el.count() > 0 else ""
+                        objet = objet_el.inner_text().replace("Objet\n:", "").replace("Objet :", "").strip() if objet_el.count() > 0 else "N/A"
 
                         buyer_el = row.locator("div[id*='_panelBlocDenomination']")
-                        buyer = buyer_el.inner_text().replace("Acheteur public\n:", "").replace("Acheteur public :", "").strip() if buyer_el.count() > 0 else ""
+                        buyer = buyer_el.inner_text().replace("Acheteur public\n:", "").replace("Acheteur public :", "").strip() if buyer_el.count() > 0 else "N/A"
 
-                        deadline_el = row.locator("td[headers='cons_dateEnd'] .cloture-line")
-                        deadline = deadline_el.inner_text().replace("\n", " ").strip() if deadline_el.count() > 0 else ""
+                        # 🛠️ LOG DE DÉBOGAGE : Affiche chaque offre analysée
+                        log(f"   👉 [{i+1}] Acheteur: '{buyer}' | Objet: '{objet[:50]}...'")
 
-                        link_el = row.locator("td.actions a").first
-                        relative_link = link_el.get_attribute("href")
-                        final_link = f"https://www.marchespublics.gov.ma/index.php{relative_link}" if relative_link else URL_AO
+                        offer_id = hashlib.md5(full_row_text.encode('utf-8')).hexdigest()
+                        if offer_id in seen_ids: 
+                            log("      ↳ 💤 Déjà vue (Ignorée)")
+                            continue
 
-                        # Scoring
+                        # --- SCORING ---
                         score, matched_category = scorer(objet, buyer)
+                        
+                        # 🛠️ LOG DU SCORE
+                        if score > 0:
+                            log(f"      ✅ GARDÉE ! Score: {score} ({matched_category})")
+                        else:
+                            log(f"      ❌ REJETÉE : {matched_category}") # matched_category contient la raison du rejet (ex: "Exclu")
 
                         if score > 0:
-                            log(f"      ✅ Trouvé : {buyer[:30]}...")
+                            # Extraction du reste si c'est bon
+                            deadline_el = row.locator("td[headers='cons_dateEnd'] .cloture-line")
+                            deadline = deadline_el.inner_text().replace("\n", " ").strip() if deadline_el.count() > 0 else ""
+                            
+                            link_el = row.locator("td.actions a").first
+                            relative_link = link_el.get_attribute("href")
+                            final_link = f"https://www.marchespublics.gov.ma/index.php{relative_link}" if relative_link else URL_AO
+
                             is_agri_special = matched_category == "Agri"
                             
                             if is_agri_special:
@@ -237,23 +239,23 @@ def scan_ao_attempt():
                                 'id': offer_id
                             })
 
-                    except Exception as e: continue
+                    except Exception as e: 
+                        log(f"   ⚠️ Erreur lecture ligne {i}: {e}")
+                        continue
                 
-                # Passer à la page suivante si ce n'est pas la dernière
+                # Page suivante
                 if current_page < total_pages:
-                    log("➡️ Page suivante...")
+                    log("➡️ Clic Page Suivante...")
                     try:
-                        # Clic sur la flèche "Suivant" (ID identifié dans ton HTML)
                         page.click("#ctl0_CONTENU_PAGE_resultSearch_PagerTop_ctl2")
-                        # Attente chargement
                         page.wait_for_load_state("networkidle")
                         time.sleep(3)
                     except Exception as e:
                         log(f"❌ Erreur pagination: {e}")
-                        break # Stop si on ne peut pas changer de page
+                        break
 
         except Exception as e:
-            log(f"❌ Erreur technique: {e}")
+            log(f"❌ Erreur technique globale: {e}")
             return False
 
         browser.close()
@@ -270,9 +272,9 @@ def scan_ao_attempt():
         
         seen_ids.update(new_ids)
         save_seen(seen_ids)
-        log(f"🚀 {count_sent} alertes envoyées.")
+        log(f"🚀 {count_sent} alertes envoyées sur Telegram.")
     else:
-        log("Ø Rien de nouveau (AO).")
+        log("Ø Aucune offre pertinente trouvée (après filtrage).")
 
     return True
 
@@ -280,7 +282,7 @@ def run_with_retries():
     MAX_RETRIES = 3
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            log(f"🏁 Démarrage Scan AO Solo (Tentative {attempt}/{MAX_RETRIES})...")
+            log(f"🏁 Démarrage Scan AO (Tentative {attempt}/{MAX_RETRIES})...")
             success = scan_ao_attempt()
             if success: return 
         except Exception as e:
@@ -292,8 +294,8 @@ def run_with_retries():
                 send_telegram_to_user(SUBSCRIBERS[0]["id"], f"❌ Crash Bot AO: {e}")
 
 if __name__ == "__main__":
-    log("🚀 Bot AO Solo Démarré")
-    send_telegram_to_user(SUBSCRIBERS[0]["id"], "🚜 Bot AO (Solo) connecté. Pagination et Filtres actifs !")
+    log("🚀 Bot AO Démarré (Mode BAVARD)")
+    send_telegram_to_user(SUBSCRIBERS[0]["id"], "🚜 Bot AO connecté. Je t'affiche tout dans les logs maintenant !")
     
     while True:
         run_with_retries()
