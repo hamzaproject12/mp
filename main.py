@@ -24,7 +24,7 @@ SUBSCRIBERS = [
     }
 ]
 
-# --- 🎯 WHITELIST ACHETEURS ---
+# --- 🎯 WHITELIST STRICTE (SEULS CES ACHETEURS PASSENT) ---
 TARGET_BUYERS = [
     "DIRECTION REGIONALE D'AGRICULTURE",
     "DIRECTEUR REGIONAL D'AGRICULTURE",
@@ -37,18 +37,8 @@ TARGET_BUYERS = [
     "OFFICE NATIONAL DE SECURITE SANITAIRE"
 ]
 
-# --- MOTS-CLÉS ---
-KEYWORDS = {
-    "Event & Formation": [
-        "formation", "session", "atelier", "renforcement de capacité", 
-        "organisation", "animation", "événement", "sensibilisation",    
-        "réception", "pause-café", "restauration", "traiteur",          
-        "impression", "conception", "banderole", "flyer", "support",    
-        "enquête", "étude", "conseil", "agri", "réunion"
-    ]
-}
-
-# --- EXCLUSIONS ---
+# --- EXCLUSIONS (SÉCURITÉ ANTI-BRUIT) ---
+# On garde ça pour ne pas recevoir les offres de ménage/gardiennage même venant de l'Agri
 EXCLUSIONS = [
     "nettoyage", "gardiennage", "construction", "bâtiment", "plomberie",
     "sanitaire", "peinture", "électricité", "jardinage", "espaces verts", 
@@ -88,20 +78,18 @@ def scorer(text, buyer_name):
         if exc in text_lower: return 0, f"Exclu ({exc})"
         if exc in buyer_lower: return 0, f"Exclu Acheteur ({exc})"
 
-    # 2. CIBLAGE ACHETEUR (Priorité MAX)
+    # 2. VÉRIFICATION STRICTE DE L'ACHETEUR
+    is_target_buyer = False
     for target in TARGET_BUYERS:
         if target.lower() in buyer_lower:
-            # On retourne immédiatement un score positif pour ces acheteurs
-            return 100, "Agri"
-
-    # 3. Mots-clés
-    for cat, mots in KEYWORDS.items():
-        if any(mot in text_lower for mot in mots):
-            if "impression" in text_lower and not any(t in text_lower for t in ["formation", "atelier", "sensibilisation", "événement"]):
-                 return 0, "Exclu (Impression seule)"
-            return sum(1 for m in mots if m in text_lower), cat
-            
-    return 0, "Pas de mots-clés"
+            is_target_buyer = True
+            break
+    
+    if is_target_buyer:
+        return 100, "Agri"
+    else:
+        # Si l'acheteur n'est pas dans la liste, on rejette (Score 0)
+        return 0, "Acheteur Non-Cible"
 
 def scan_ao_attempt():
     seen_ids = load_seen()
@@ -118,7 +106,7 @@ def scan_ao_attempt():
         context = browser.new_context(viewport={"width": 1920, "height": 1080})
         page = context.new_page()
 
-        log(f"🌍 Connexion AO : {date_start} -> {date_end}")
+        log(f"🌍 Connexion AO (Filtre Strict) : {date_start} -> {date_end}")
         
         try:
             page.goto(URL_AO, timeout=90000)
@@ -169,42 +157,35 @@ def scan_ao_attempt():
                 count_on_page = rows.count()
                 log(f"   🔎 {count_on_page} lignes trouvées sur cette page.")
 
-                if count_on_page == 0:
-                    log("   ⚠️ Bizarre : Aucune ligne 'tr' trouvée dans le tableau.")
-
                 for i in range(count_on_page):
                     row = rows.nth(i)
                     if not row.is_visible(): continue
 
                     try:
-                        # Extraction brute pour log
                         full_row_text = row.inner_text()
                         
-                        # --- EXTRACTION DES CHAMPS ---
-                        objet_el = row.locator("div[id*='_panelBlocObjet']")
-                        objet = objet_el.inner_text().replace("Objet\n:", "").replace("Objet :", "").strip() if objet_el.count() > 0 else "N/A"
-
+                        # --- EXTRACTION ---
                         buyer_el = row.locator("div[id*='_panelBlocDenomination']")
                         buyer = buyer_el.inner_text().replace("Acheteur public\n:", "").replace("Acheteur public :", "").strip() if buyer_el.count() > 0 else "N/A"
 
-                        log(f"   👉 [{i+1}] Acheteur: '{buyer}' | Objet: '{objet[:50]}...'")
+                        objet_el = row.locator("div[id*='_panelBlocObjet']")
+                        objet = objet_el.inner_text().replace("Objet\n:", "").replace("Objet :", "").strip() if objet_el.count() > 0 else "N/A"
+
+                        # 🛠️ LOG DE DÉBOGAGE
+                        log(f"   👉 [{i+1}] Acheteur: '{buyer}'")
 
                         offer_id = hashlib.md5(full_row_text.encode('utf-8')).hexdigest()
                         if offer_id in seen_ids: 
                             log("      ↳ 💤 Déjà vue (Ignorée)")
                             continue
 
-                        # --- SCORING ---
-                        score, matched_category = scorer(objet, buyer)
+                        # --- SCORING STRICT ---
+                        score, matched_reason = scorer(objet, buyer)
                         
                         if score > 0:
-                            log(f"      ✅ GARDÉE ! Score: {score} ({matched_category})")
-                        else:
-                            log(f"      ❌ REJETÉE : {matched_category}")
-
-                        if score > 0:
-                            # Extraction du reste si c'est bon
-                            # FIX 2 ELEMENTS ERROR: use .first to get only the first date found
+                            log(f"      ✅ VALIDÉE ! ({matched_reason})")
+                            
+                            # Extraction date (Correction v7)
                             deadline_cells = row.locator("td[headers='cons_dateEnd'] .cloture-line")
                             if deadline_cells.count() > 0:
                                 deadline = deadline_cells.first.inner_text().replace("\n", " ").strip()
@@ -215,38 +196,28 @@ def scan_ao_attempt():
                             relative_link = link_el.get_attribute("href")
                             final_link = f"https://www.marchespublics.gov.ma/index.php{relative_link}" if relative_link else URL_AO
 
-                            is_agri_special = matched_category == "Agri"
-                            
-                            if is_agri_special:
-                                msg_text = (
-                                    f"🚜 **URGENT AGRI (AO)** 🚜\n"
-                                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"🏛️ *Acheteur :* {buyer}\n"
-                                    f"📅 *Limite :* `{deadline}`\n"
-                                    f"━━━━━━━━━━━━━━━━━━━━\n"
-                                    f"{objet}\n\n"
-                                    f"🔗 [VOIR L'APPEL D'OFFRE]({final_link})"
-                                )
-                            else:
-                                msg_text = (
-                                    f"🚨 **ALERTE AO - {matched_category}**\n"
-                                    f"🏛️ {buyer}\n"
-                                    f"⏳ *{deadline}* | 🎯 Score: *{score}*\n\n"
-                                    f"{objet}\n\n"
-                                    f"🔗 [Voir l'offre]({final_link})"
-                                )
+                            msg_text = (
+                                f"🚜 **OFFRE AGRI CIBLÉE** 🚜\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"🏛️ *Acheteur :* {buyer}\n"
+                                f"📅 *Limite :* `{deadline}`\n"
+                                f"━━━━━━━━━━━━━━━━━━━━\n"
+                                f"{objet}\n\n"
+                                f"🔗 [VOIR L'OFFRE]({final_link})"
+                            )
 
                             pending_alerts.append({
-                                'score': score + (500 if is_agri_special else 0),
+                                'score': score,
                                 'msg': msg_text,
                                 'id': offer_id
                             })
+                        else:
+                             log(f"      ❌ REJETÉE : {matched_reason}")
 
                     except Exception as e: 
                         log(f"   ⚠️ Erreur lecture ligne {i}: {e}")
                         continue
                 
-                # Page suivante
                 if current_page < total_pages:
                     log("➡️ Clic Page Suivante...")
                     try:
@@ -264,7 +235,7 @@ def scan_ao_attempt():
         browser.close()
 
     if pending_alerts:
-        pending_alerts.sort(key=lambda x: x['score'], reverse=True)
+        # On envoie les plus récentes en premier
         count_sent = 0
         admin_id = SUBSCRIBERS[0]["id"]
         
@@ -275,9 +246,9 @@ def scan_ao_attempt():
         
         seen_ids.update(new_ids)
         save_seen(seen_ids)
-        log(f"🚀 {count_sent} alertes envoyées sur Telegram.")
+        log(f"🚀 {count_sent} alertes Agri envoyées.")
     else:
-        log("Ø Aucune offre pertinente trouvée (après filtrage).")
+        log("Ø Aucune offre de la liste cible trouvée.")
 
     return True
 
@@ -285,20 +256,16 @@ def run_with_retries():
     MAX_RETRIES = 3
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            log(f"🏁 Démarrage Scan AO (Tentative {attempt}/{MAX_RETRIES})...")
+            log(f"🏁 Scan AO Strict (Tentative {attempt})...")
             success = scan_ao_attempt()
             if success: return 
         except Exception as e:
-            log(f"⚠️ ERREUR TENTATIVE {attempt} : {e}")
-            if attempt < MAX_RETRIES:
-                time.sleep(60)
-            else:
-                log("❌ ECHEC TOTAL.")
-                send_telegram_to_user(SUBSCRIBERS[0]["id"], f"❌ Crash Bot AO: {e}")
+            log(f"⚠️ Erreur {e}")
+            time.sleep(60)
 
 if __name__ == "__main__":
-    log("🚀 Bot AO Démarré (Mode BAVARD)")
-    send_telegram_to_user(SUBSCRIBERS[0]["id"], "🚜 Bot AO connecté. Je t'affiche tout dans les logs maintenant !")
+    log("🚀 Bot AO Démarré (FILTRE STRICT ACHETEURS)")
+    send_telegram_to_user(SUBSCRIBERS[0]["id"], "🚜 Bot AO (Strict) : Je ne t'envoie que la liste VIP !")
     
     while True:
         run_with_retries()
