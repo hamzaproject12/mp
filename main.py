@@ -22,16 +22,16 @@ SUBSCRIBERS = [
         "id": "1952904877", 
         "subscriptions": ["ALL"] 
     },
-    # {
-    #     "name": "Administrateur",
-    #     "id": "7879373928", 
-    #     "subscriptions": ["ALL"] 
-    # },
-    # {
-    #     "name": "Administrateur",
-    #     "id": "8260779046", 
-    #     "subscriptions": ["ALL"] 
-    # }
+    {
+        "name": "Administrateur",
+        "id": "7879373928", 
+        "subscriptions": ["ALL"] 
+    },
+    {
+        "name": "Administrateur",
+        "id": "8260779046", 
+        "subscriptions": ["ALL"] 
+    }
 ]
 
 # --- 🎯 WHITELIST ACHETEURS (STRICT) ---
