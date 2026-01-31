@@ -21,30 +21,76 @@ SUBSCRIBERS = [
         "name": "Administrateur",
         "id": "1952904877", 
         "subscriptions": ["ALL"] 
-    }
+    },
+    # {
+    #     "name": "Administrateur",
+    #     "id": "7879373928", 
+    #     "subscriptions": ["ALL"] 
+    # },
+    # {
+    #     "name": "Administrateur",
+    #     "id": "8260779046", 
+    #     "subscriptions": ["ALL"] 
+    # }
 ]
 
 # --- 🎯 WHITELIST ACHETEURS (STRICT) ---
+# --- 🎯 WHITELIST ULTRA-COMPLÈTE (VARIATIONS & FAUTES INCLUSES) ---
 TARGET_BUYERS = [
+    # --- DIRECTIONS RÉGIONALES (DRA) ---
+    "DIRECTION REGIONALE DE L'AGRICULTURE",
     "DIRECTION REGIONALE D'AGRICULTURE",
+    "DIRECTEUR REGIONAL DE L'AGRICULTURE",
     "DIRECTEUR REGIONAL D'AGRICULTURE",
-    "DIRECTION PROVINCIAL DE L'AGRICULTURE",
+    "DIRECTION REGIONALE AGRICULTURE", # Variante courte
+    
+    # --- DIRECTIONS PROVINCIALES (DPA) - Avec gestion des fautes d'accord ---
+    "DIRECTION PROVINCIALE DE L'AGRICULTURE",
+    "DIRECTION PROVINCIALE D'AGRICULTURE",
     "DIRECTEUR PROVINCIAL DE L'AGRICULTURE",
-    "CHAMBRE D'AGRICULTURE",
-    "MISE EN VALEUR AGRICOLE",
-    "CONSEIL AGRICOLE",
+    "DIRECTEUR PROVINCIAL D'AGRICULTURE",
+    # Cas spécifiques de fautes fréquentes sur le portail :
+    "DIRECTEUR PROVINCIALE DE L'AGRICULTURE", 
+    "DIRECTEUR PROVINCIALE D'AGRICULTURE",
+    "DIRECTION PROVINCIAL DE L'AGRICULTURE",
+    
+    # --- OFFICES DE MISE EN VALEUR (ORMVA) ---
+    "OFFICE REGIONAL DE MISE EN VALEUR AGRICOLE",
+    "OFFICE REGIONAL DE LA MISE EN VALEUR AGRICOLE",
+    "ORMVA", # L'acronyme est souvent utilisé seul (ex: ORMVA DU GHARB)
+    "O.R.M.V.A",
+    
+    # --- SÉCURITÉ SANITAIRE (ONSSA) ---
     "ONSSA",
-    "OFFICE NATIONAL DE SECURITE SANITAIRE"
+    "OFFICE NATIONAL DE SECURITE SANITAIRE",
+    "DIRECTION REGIONALE DE L'ONSSA",
+    
+    # --- CONSEIL AGRICOLE (ONCA) ---
+    "ONCA",
+    "OFFICE NATIONAL DU CONSEIL AGRICOLE",
+    "DIRECTION REGIONALE DU CONSEIL AGRICOLE",
+    "CENTRE DU CONSEIL AGRICOLE",
+    "CONSEIL AGRICOLE",
+
+    # --- CHAMBRES ---
+    "CHAMBRE D'AGRICULTURE",
+    "CHAMBRE REGIONALE D'AGRICULTURE",
+    
+    # --- INSTITUTS & ÉCOLES (FORMATION AGRICOLE) ---
+    "ECOLE NATIONALE D'AGRICULTURE", # ENA
+    
+    # --- AGENCES DE DÉVELOPPEMENT ---
+    "AGENCE NATIONALE POUR LE DEVELOPPEMENT DES ZONES OASIENNES" # ANDZOA
 ]
 
 # --- EXCLUSIONS (SÉCURITÉ) ---
 EXCLUSIONS = [
     "nettoyage", "gardiennage"
-    # , "construction", "bâtiment", "plomberie",
-    # "sanitaire", "peinture", "électricité", "jardinage", "espaces verts", 
-    # "piscine", "vêtement", "habillement", "carburant", "véhicule", 
-    # "transport", "billet", "aérien", "travaux", "voirie", "topographique",
-    # "la peche", "secteur de la pêche", "maritime" 
+    , "construction", "bâtiment", "plomberie",
+    "sanitaire", "peinture", "électricité", "jardinage", "espaces verts", 
+    "piscine", "vêtement", "habillement", "carburant", "véhicule", 
+    "transport", "billet", "aérien", "travaux", "voirie", "topographique",
+    "la peche", "secteur de la pêche", "maritime" 
 ]
 
 def log(msg):
