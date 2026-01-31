@@ -91,6 +91,7 @@ def scorer(text, buyer_name):
     # 2. CIBLAGE ACHETEUR (Priorité MAX)
     for target in TARGET_BUYERS:
         if target.lower() in buyer_lower:
+            # On retourne immédiatement un score positif pour ces acheteurs
             return 100, "Agri"
 
     # 3. Mots-clés
@@ -186,7 +187,6 @@ def scan_ao_attempt():
                         buyer_el = row.locator("div[id*='_panelBlocDenomination']")
                         buyer = buyer_el.inner_text().replace("Acheteur public\n:", "").replace("Acheteur public :", "").strip() if buyer_el.count() > 0 else "N/A"
 
-                        # 🛠️ LOG DE DÉBOGAGE : Affiche chaque offre analysée
                         log(f"   👉 [{i+1}] Acheteur: '{buyer}' | Objet: '{objet[:50]}...'")
 
                         offer_id = hashlib.md5(full_row_text.encode('utf-8')).hexdigest()
@@ -197,16 +197,19 @@ def scan_ao_attempt():
                         # --- SCORING ---
                         score, matched_category = scorer(objet, buyer)
                         
-                        # 🛠️ LOG DU SCORE
                         if score > 0:
                             log(f"      ✅ GARDÉE ! Score: {score} ({matched_category})")
                         else:
-                            log(f"      ❌ REJETÉE : {matched_category}") # matched_category contient la raison du rejet (ex: "Exclu")
+                            log(f"      ❌ REJETÉE : {matched_category}")
 
                         if score > 0:
                             # Extraction du reste si c'est bon
-                            deadline_el = row.locator("td[headers='cons_dateEnd'] .cloture-line")
-                            deadline = deadline_el.inner_text().replace("\n", " ").strip() if deadline_el.count() > 0 else ""
+                            # FIX 2 ELEMENTS ERROR: use .first to get only the first date found
+                            deadline_cells = row.locator("td[headers='cons_dateEnd'] .cloture-line")
+                            if deadline_cells.count() > 0:
+                                deadline = deadline_cells.first.inner_text().replace("\n", " ").strip()
+                            else:
+                                deadline = ""
                             
                             link_el = row.locator("td.actions a").first
                             relative_link = link_el.get_attribute("href")
